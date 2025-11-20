@@ -4,9 +4,8 @@ import time
 from deep_translator import GoogleTranslator
 
 # --- 配置 ---
-SOURCE_LANG = 'auto' # 自动检测，或指定 'ru'
+SOURCE_LANG = 'auto' 
 TARGET_LANG = 'en'
-# 每次翻译暂停时间，防止被 Google 封 IP
 SLEEP_TIME = 0.5 
 
 translator = GoogleTranslator(source=SOURCE_LANG, target=TARGET_LANG)
@@ -14,98 +13,146 @@ translator = GoogleTranslator(source=SOURCE_LANG, target=TARGET_LANG)
 def do_translate(text):
     if not text or not text.strip():
         return text
-    # 如果全是符号、数字或看起来像代码变量（包含$），则跳过，防止破坏脚本
-    if re.match(r'^[\W\d]+$', text) or '$' in text:
+    # 仅跳过纯符号或纯数字
+    if re.match(r'^[\W\d]+$', text):
         return text
     
     try:
-        # 翻译
+        # 简单的保护：如果包含路径 /opt/ 或 IP地址，尽量不翻译（可选）
+        if '/opt/' in text or re.search(r'\d+\.\d+\.\d+\.\d+', text):
+            print(f"  [Skip] Path/IP detected: {text[:15]}...")
+            return text
+
         res = translator.translate(text)
         time.sleep(SLEEP_TIME)
-        print(f"[OK] {text[:10]}... -> {res[:10]}...")
+        # 简单的回显，防止日志过大，截取前20字符
+        print(f"  [Trans] '{text[:20]}...' -> '{res[:20]}...'")
         return res
     except Exception as e:
-        print(f"[Error] Translating '{text}': {e}")
+        print(f"  [Error] Translating '{text}': {e}")
         return text
 
+def read_file_content(file_path):
+    """尝试多种编码读取文件"""
+    encodings = ['utf-8', 'windows-1251', 'cp1251', 'latin1']
+    for enc in encodings:
+        try:
+            with open(file_path, 'r', encoding=enc) as f:
+                content = f.readlines()
+            print(f"Opened {file_path} with encoding: {enc}")
+            return content, enc
+        except UnicodeDecodeError:
+            continue
+    print(f"[Fail] Could not determine encoding for {file_path}")
+    return None, None
+
 def process_sh_file(file_path):
-    print(f"Checking SH: {file_path}")
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
+    print(f"Processing SH: {file_path}")
+    lines, encoding = read_file_content(file_path)
+    if not lines:
+        return
 
     new_lines = []
-    # 匹配 echo "内容" 或 echo '内容'
-    echo_pattern = re.compile(r'(echo\s+(?:-e\s+)?["\'])(.*?)(["\'])')
-    # 匹配注释 #，但在 #!/bin/bash 之后
-    comment_pattern = re.compile(r'^(\s*#\s+)(?!/|!)(.*)')
+    modified = False
+
+    # 1. 匹配字符串：支持 echo, printf, logger, log
+    # 匹配双引号或单引号中的内容
+    string_pattern = re.compile(r'((?:echo|printf|logger|log)\s+(?:-[a-zA-Z]+\s+)?["\'])(.*?)(["\'])')
+    
+    # 2. 匹配注释：支持行首 # 和 行内 # (前提是 # 前面有空格，避免匹配到 url 中的 #)
+    # group(1) 是 # 前面的内容, group(2) 是 # 及其后空格, group(3) 是注释内容
+    comment_pattern = re.compile(r'^(.*?)(#\s+)(.*)$')
 
     for line in lines:
-        # 1. 处理注释
-        match_comment = comment_pattern.match(line)
-        if match_comment:
-            prefix, content = match_comment.groups()
-            translated = do_translate(content)
-            new_lines.append(f"{prefix}{translated}\n")
-            continue
+        original_line = line
         
-        # 2. 处理 echo 字符串
-        def replace_echo(match):
+        # --- 处理注释 ---
+        # 排除 shebang #!/bin/...
+        if not line.strip().startswith("#!"):
+            match_comment = comment_pattern.match(line)
+            if match_comment:
+                pre, hash_mark, content = match_comment.groups()
+                # 只有当内容包含俄语字符时才翻译 (简单的西里尔字母判断)
+                if re.search(r'[а-яА-Я]', content):
+                    trans_content = do_translate(content)
+                    line = f"{pre}{hash_mark}{trans_content}\n"
+                    modified = True
+        
+        # --- 处理命令字符串 (echo等) ---
+        # 如果这一行已经被注释处理过，用处理过的 line 继续匹配字符串
+        def replace_str(match):
             prefix, content, suffix = match.groups()
-            # 如果内容包含 $ 变量，Google Translate 可能会破坏它，这里选择跳过
-            if '$' in content: 
-                return match.group(0)
-            translated = do_translate(content)
-            return f"{prefix}{translated}{suffix}"
+            # 包含西里尔字母才翻译
+            if re.search(r'[а-яА-Я]', content):
+                nonlocal modified
+                modified = True
+                return f"{prefix}{do_translate(content)}{suffix}"
+            return match.group(0)
+
+        line = string_pattern.sub(replace_str, line)
         
-        line = echo_pattern.sub(replace_echo, line)
         new_lines.append(line)
 
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(new_lines)
+    if modified:
+        print(f"Saving changes to {file_path}")
+        with open(file_path, 'w', encoding=encoding) as f:
+            f.writelines(new_lines)
+    else:
+        print(f"No Russian content found or translated in {file_path}")
 
 def process_md_file(file_path):
-    print(f"Checking MD: {file_path}")
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
+    print(f"Processing MD: {file_path}")
+    lines, encoding = read_file_content(file_path)
+    if not lines:
+        return
+
     new_lines = []
     in_code_block = False
+    modified = False
     
     for line in lines:
         stripped = line.strip()
-        # 识别代码块 ```
         if stripped.startswith('```'):
             in_code_block = not in_code_block
             new_lines.append(line)
             continue
         
-        # 跳过代码块、空行、HTML、链接引用
-        if in_code_block or not stripped or stripped.startswith('<') or stripped.startswith('['):
+        # 跳过代码块、空行、HTML
+        if in_code_block or not stripped or stripped.startswith('<'):
             new_lines.append(line)
             continue
             
-        # 简单的 Markdown 文本提取 (处理标题、列表等前缀)
-        prefix_match = re.match(r'^(\s*(?:#+|\-|\*|\d+\.|>)\s+)?(.*)', line)
-        if prefix_match:
-            prefix, content = prefix_match.groups()
-            if prefix is None: prefix = ""
-            translated = do_translate(content)
-            new_lines.append(f"{prefix}{translated}\n")
-        else:
-            new_lines.append(line)
+        # 只有包含西里尔字母才尝试翻译
+        if re.search(r'[а-яА-Я]', line):
+            # 简单处理：保留 Markdown 前缀
+            prefix_match = re.match(r'^(\s*(?:#+|\-|\*|\d+\.|>)\s+)?(.*)', line)
+            if prefix_match:
+                prefix, content = prefix_match.groups()
+                if prefix is None: prefix = ""
+                translated = do_translate(content)
+                new_lines.append(f"{prefix}{translated}\n")
+                modified = True
+                continue
 
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(new_lines)
+        new_lines.append(line)
+
+    if modified:
+        with open(file_path, 'w', encoding=encoding) as f:
+            f.writelines(new_lines)
 
 def main():
-    # 排除目录
     exclude_dirs = ['.git', '.github']
+    # 目标文件扩展名，针对路由器脚本增加 .conf 或无后缀文件的判断逻辑比较复杂，
+    # 这里主要针对 .sh 和 .md，如果你的脚本没有后缀，需要修改 logic。
+    target_exts = ['.sh', '.cfg', '.conf'] 
+    
     for root, dirs, files in os.walk("."):
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
         
         for file in files:
             file_path = os.path.join(root, file)
-            if file.endswith(".sh"):
+            
+            if any(file.endswith(ext) for ext in target_exts):
                 process_sh_file(file_path)
             elif file.lower() == "readme.md":
                 process_md_file(file_path)
