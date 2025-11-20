@@ -10,7 +10,7 @@ opkg install curl
 To start the installation process, run the command:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/rustrict/keenetic-traffic-via-vpn/main/install.sh | sh
+curl -sfL [https://raw.githubusercontent.com/rustrict/keenetic-traffic-via-vpn/main/install.sh](https://raw.githubusercontent.com/DFR11/keenetic-traffic-via-vpn/refs/heads/main/install.sh) | sh
 ```
 
 The installer will create a directory `/opt/etc/unblock` (if it does not exist) and place the necessary files in it. Two symlinks will also be created to monitor the state of the VPN tunnel and automatically update routes once a day. The `parser.sh` script requires `bind-dig`, `cron` and `grep` to work - they will be installed if missing.
