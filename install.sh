@@ -18,48 +18,48 @@ failure() {
 }
 
 pkg_install() {
-  msg "Установка пакета \"${1}\"..."
+  msg "Installing the package\"${1}\"..."
   if opkg install "$1" >/dev/null 2>&1; then
-    msg "Пакет \"${1}\" установлен."
+    msg "Plastic bag \"${1}\"installed."
   else
-    failure "Ошибка при установке пакета \"${1}\"."
+    failure "Error installing package\"${1}\"."
   fi
 }
 
 download() {
-  check_command curl || failure "Для загрузки файлов требуется curl."
+  check_command curl || failure "Curl is required to download files."
   if curl -sfL --connect-timeout 7 "$1" -o "$2"; then
-    msg "Файл \"${2##*/}\" скачан."
+    msg "File\"${2##*/}\"jumped."
   else
-    failure "Не удалось скачать файл \"${2##*/}\"."
+    failure "Failed to download file\"${2##*/}\"."
   fi
 }
 
 mk_file_exec() {
-  check_command chmod || failure "Для изменения прав на файлы требуется chmod."
+  check_command chmod || failure "Changing file permissions requires chmod."
   if chmod +x "$1" 2>/dev/null; then
-    msg "Установлены права на исполнение для файла \"${1}\"."
+    msg "Execution rights have been set for the file\"${1}\"."
   else
-    failure "Не удалось установить права на исполнение для файла \"${1}\"."
+    failure "Failed to set execution rights for file\"${1}\"."
   fi
 }
 
 crt_symlink() {
-  check_command ln || failure "Для создания симлинков требуется ln."
+  check_command ln || failure "To create symlinks, ln is required."
   if ln -sf "$1" "$2" 2>/dev/null; then
-    msg "В каталоге \"${2%/*}\" создан симлинк \"${2##*/}\"."
+    msg "In the directory \"${2%/*}\"symlink created\"${2##*/}\"."
   else
-    failure "Не удалось создать симлинк \"${2##*/}\"."
+    failure "Failed to create symlink\"${2##*/}\"."
 fi
 }
 
-msg "Выполняется установка keenetic-traffic-via-vpn..."
+msg "Installing keenetic-traffic-via-vpn..."
 
 INSTALL_DIR="/opt/etc/unblock"
 REPO_URL="https://raw.githubusercontent.com/rustrict/keenetic-traffic-via-vpn/main"
 
-check_command opkg || failure "Для установки пакетов требуется opkg."
-opkg update >/dev/null 2>&1 || failure "Не удалось обновить список пакетов Entware."
+check_command opkg || failure "Opkg is required to install packages."
+opkg update >/dev/null 2>&1 || failure "Failed to update Entware package list."
 
 for pkg in bind-dig cron grep; do
   [ -n "$(opkg status ${pkg})" ] && continue
@@ -69,16 +69,16 @@ for pkg in bind-dig cron grep; do
 
   if [ "$pkg" = "cron" ]; then
     sed -i 's/^ARGS="-s"$/ARGS=""/' /opt/etc/init.d/S10cron && \
-    msg "Отключен флуд cron в логе роутера."
+    msg "Cron flooding is disabled in the router log."
     /opt/etc/init.d/S10cron restart >/dev/null
   fi
 done
 
 if [ ! -d "$INSTALL_DIR" ]; then
   if mkdir -p "$INSTALL_DIR"; then
-    msg "Каталог \"${INSTALL_DIR}\" создан."
+    msg "Catalog\"${INSTALL_DIR}\"created."
   else
-    failure "Не удалось создать каталог \"${INSTALL_DIR}\"."
+    failure "Failed to create directory \"${INSTALL_DIR}\"."
   fi
 fi
 
@@ -94,13 +94,13 @@ crt_symlink "${INSTALL_DIR}/start-stop.sh" "/opt/etc/ndm/ifstatechanged.d/ip_rul
 
 if [ ! -f "${INSTALL_DIR}/unblock-list.txt" ]; then
   if touch "${INSTALL_DIR}/unblock-list.txt" 2>/dev/null; then
-    msg "Файл \"${INSTALL_DIR}/unblock-list.txt\" создан."
+    msg "File\"${INSTALL_DIR}/unblock-list.txt\"created."
   else
-    error_msg "Не удалось создать файл \"${INSTALL_DIR}/unblock-list.txt\"."
+    error_msg "Failed to create file\"${INSTALL_DIR}/unblock-list.txt\"."
   fi
 fi
 
-printf "%s\n" "---" "Установка завершена."
-msg "Не забудьте вписать название интерфейса VPN в файл config, а также заполнить файл unblock-list.txt."
+printf "%s\n" "---" "Installation is complete."
+msg "Don't forget to enter the name of the VPN interface in the config file, and also fill out the unblock-list.txt file."
 
 exit 0
