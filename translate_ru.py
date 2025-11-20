@@ -4,36 +4,29 @@ import time
 from deep_translator import GoogleTranslator
 
 # --- 配置 ---
-SOURCE_LANG = 'auto' 
-TARGET_LANG = 'en'
+# 源语言自动检测，目标语言英文
+translator = GoogleTranslator(source='auto', target='en')
 SLEEP_TIME = 0.5 
-
-translator = GoogleTranslator(source=SOURCE_LANG, target=TARGET_LANG)
 
 def do_translate(text):
     if not text or not text.strip():
         return text
-    # 仅跳过纯符号或纯数字
-    if re.match(r'^[\W\d]+$', text):
+    # 排除纯符号、数字、IP地址、路径
+    if re.match(r'^[\W\d]+$', text) or '/opt/' in text or '192.168.' in text:
         return text
     
     try:
-        # 简单的保护：如果包含路径 /opt/ 或 IP地址，尽量不翻译（可选）
-        if '/opt/' in text or re.search(r'\d+\.\d+\.\d+\.\d+', text):
-            print(f"  [Skip] Path/IP detected: {text[:15]}...")
-            return text
-
         res = translator.translate(text)
         time.sleep(SLEEP_TIME)
-        # 简单的回显，防止日志过大，截取前20字符
-        print(f"  [Trans] '{text[:20]}...' -> '{res[:20]}...'")
+        # 日志仅打印前30个字符，保持整洁
+        print(f"    [Trans] {text[:30]}... -> {res[:30]}...")
         return res
     except Exception as e:
-        print(f"  [Error] Translating '{text}': {e}")
+        print(f"    [Error] {e}")
         return text
 
 def read_file_content(file_path):
-    """尝试多种编码读取文件"""
+    """尝试多种编码读取，Keenetic脚本常用 cp1251 或 utf-8"""
     encodings = ['utf-8', 'windows-1251', 'cp1251', 'latin1']
     for enc in encodings:
         try:
@@ -43,11 +36,15 @@ def read_file_content(file_path):
             return content, enc
         except UnicodeDecodeError:
             continue
-    print(f"[Fail] Could not determine encoding for {file_path}")
+    print(f"[Fail] Could not read {file_path} (unknown encoding)")
     return None, None
 
-def process_sh_file(file_path):
-    print(f"Processing SH: {file_path}")
+def has_cyrillic(text):
+    """检查是否包含俄语字母"""
+    return bool(re.search(r'[а-яА-Я]', text))
+
+def process_code_file(file_path):
+    print(f"Processing File: {file_path}")
     lines, encoding = read_file_content(file_path)
     if not lines:
         return
@@ -55,38 +52,42 @@ def process_sh_file(file_path):
     new_lines = []
     modified = False
 
-    # 1. 匹配字符串：支持 echo, printf, logger, log
-    # 匹配双引号或单引号中的内容
-    string_pattern = re.compile(r'((?:echo|printf|logger|log)\s+(?:-[a-zA-Z]+\s+)?["\'])(.*?)(["\'])')
+    # 1. 匹配所有双引号或单引号内的内容 (不局限于 echo)
+    # 捕获组: (前缀引号)(内容)(后缀引号)
+    # 排除掉像 "$VAR" 这种纯变量引用，避免破坏代码
+    string_pattern = re.compile(r'(["\'])(.*?)(["\'])')
     
-    # 2. 匹配注释：支持行首 # 和 行内 # (前提是 # 前面有空格，避免匹配到 url 中的 #)
-    # group(1) 是 # 前面的内容, group(2) 是 # 及其后空格, group(3) 是注释内容
+    # 2. 匹配注释 (# 及其后的内容)
     comment_pattern = re.compile(r'^(.*?)(#\s+)(.*)$')
 
     for line in lines:
+        # 跳过 Shebang
+        if line.strip().startswith("#!"):
+            new_lines.append(line)
+            continue
+
         original_line = line
         
-        # --- 处理注释 ---
-        # 排除 shebang #!/bin/...
-        if not line.strip().startswith("#!"):
-            match_comment = comment_pattern.match(line)
-            if match_comment:
-                pre, hash_mark, content = match_comment.groups()
-                # 只有当内容包含俄语字符时才翻译 (简单的西里尔字母判断)
-                if re.search(r'[а-яА-Я]', content):
-                    trans_content = do_translate(content)
-                    line = f"{pre}{hash_mark}{trans_content}\n"
-                    modified = True
+        # --- A. 处理注释 ---
+        match_comment = comment_pattern.match(line)
+        if match_comment:
+            pre, hash_mark, content = match_comment.groups()
+            # 只有当注释包含俄语时才翻译
+            if has_cyrillic(content):
+                trans_content = do_translate(content)
+                line = f"{pre}{hash_mark}{trans_content}\n"
+                modified = True
         
-        # --- 处理命令字符串 (echo等) ---
-        # 如果这一行已经被注释处理过，用处理过的 line 继续匹配字符串
+        # --- B. 处理字符串 (变量赋值或 echo) ---
+        # 如果行内已经被注释处理过，用新的 line 继续处理字符串
         def replace_str(match):
-            prefix, content, suffix = match.groups()
-            # 包含西里尔字母才翻译
-            if re.search(r'[а-яА-Я]', content):
+            quote_open, content, quote_close = match.groups()
+            # 1. 必须包含俄语
+            # 2. 不能包含太复杂的命令替换 (如 `cmd`)，防止坏掉
+            if has_cyrillic(content) and '`' not in content:
                 nonlocal modified
                 modified = True
-                return f"{prefix}{do_translate(content)}{suffix}"
+                return f"{quote_open}{do_translate(content)}{quote_close}"
             return match.group(0)
 
         line = string_pattern.sub(replace_str, line)
@@ -94,17 +95,16 @@ def process_sh_file(file_path):
         new_lines.append(line)
 
     if modified:
-        print(f"Saving changes to {file_path}")
+        print(f"  -> Saving changes to {file_path}")
         with open(file_path, 'w', encoding=encoding) as f:
             f.writelines(new_lines)
     else:
-        print(f"No Russian content found or translated in {file_path}")
+        print(f"  -> No Russian content translated in {file_path}")
 
 def process_md_file(file_path):
     print(f"Processing MD: {file_path}")
     lines, encoding = read_file_content(file_path)
-    if not lines:
-        return
+    if not lines: return
 
     new_lines = []
     in_code_block = False
@@ -117,14 +117,12 @@ def process_md_file(file_path):
             new_lines.append(line)
             continue
         
-        # 跳过代码块、空行、HTML
         if in_code_block or not stripped or stripped.startswith('<'):
             new_lines.append(line)
             continue
             
-        # 只有包含西里尔字母才尝试翻译
-        if re.search(r'[а-яА-Я]', line):
-            # 简单处理：保留 Markdown 前缀
+        # Markdown 只要包含俄语就翻译
+        if has_cyrillic(line):
             prefix_match = re.match(r'^(\s*(?:#+|\-|\*|\d+\.|>)\s+)?(.*)', line)
             if prefix_match:
                 prefix, content = prefix_match.groups()
@@ -142,18 +140,22 @@ def process_md_file(file_path):
 
 def main():
     exclude_dirs = ['.git', '.github']
-    # 目标文件扩展名，针对路由器脚本增加 .conf 或无后缀文件的判断逻辑比较复杂，
-    # 这里主要针对 .sh 和 .md，如果你的脚本没有后缀，需要修改 logic。
-    target_exts = ['.sh', '.cfg', '.conf'] 
     
+    # --- 关键修改：在这里添加 'config' 这种无后缀文件 ---
+    target_files = ['config', 'Makefile'] 
+    target_exts = ['.sh', '.cfg', '.conf', '.list'] 
+
     for root, dirs, files in os.walk("."):
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
         
         for file in files:
             file_path = os.path.join(root, file)
             
-            if any(file.endswith(ext) for ext in target_exts):
-                process_sh_file(file_path)
+            # 判断逻辑：是指定后缀 OR 是指定文件名
+            is_target_code = any(file.endswith(ext) for ext in target_exts) or (file in target_files)
+            
+            if is_target_code:
+                process_code_file(file_path)
             elif file.lower() == "readme.md":
                 process_md_file(file_path)
 
