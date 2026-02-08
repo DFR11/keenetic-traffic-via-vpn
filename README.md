@@ -1,13 +1,13 @@
 Данный проект позволяет перенаправлять трафик для отдельных ресурсов в VPN-туннель на роутерах [Keenetic](https://keenetic.ru/) с использованием репозитория [Entware](https://entware.net/).
 
-## Установка
+## Installation
 Для загрузки и работы установочного скрипта требуется [curl](https://curl.se/). При отсутствии — установить командой:
 
 ```shell
 opkg install curl
 ```
 
-Для начала процесса установки выполните команду:
+To start the installation process, run the command:
 
 ```shell
 curl -sfL https://raw.githubusercontent.com/DFR11/keenetic-traffic-via-vpn/main/install.sh | sh
@@ -15,13 +15,13 @@ curl -sfL https://raw.githubusercontent.com/DFR11/keenetic-traffic-via-vpn/main/
 
 Установщик создаст каталог `/opt/etc/unblock` (если такой не существует) и поместит в него необходимые файлы. Также будут созданы два симлинка для отслеживания состояния VPN-туннеля и автоматического обновления маршрутов раз в сутки. Для работы скрипта `parser.sh` требуются `bind-dig`, `cron` и `grep` — они будут установлены при отсутствии.
 
-После окончания установки понадобится:
+After installation is complete you will need:
 - Отредактировать файл `/opt/etc/unblock/config`, указав в переменной `IFACE` название интерфейса VPN, которое можно увидеть в выводе команды `ip address show` или `ifconfig`. Например, `ovpn_br0` (=`OpenVPN0`) или `nwg0` (=`Wireguard0`);
 - Заполнить файл `/opt/etc/unblock/unblock-list.txt` доменами и (или) IPv4-адресами (как с префиксом, так и без) ресурсов, трафик до которых вы хотите пустить через VPN;
-- Запустить VPN-соединение (или перезапустить, если оно было запущено до установки).
+- Start the VPN connection (or restart if it was started before installation).
 
-### Примеры заполнения config
-Для OpenVPN-туннеля:
+### Examples of filling out config
+For an OpenVPN tunnel:
 
 ```shell
 # Название интерфейса VPN-туннеля из ifconfig или ip address show
@@ -31,7 +31,7 @@ IFACE="ovpn_br0"
 FILE="/opt/etc/unblock/unblock-list.txt"
 ```
 
-Для WireGuard-туннеля:
+For WireGuard tunnel:
 
 ```shell
 # Название интерфейса VPN-туннеля из ifconfig или ip address show
@@ -41,15 +41,15 @@ IFACE="nwg0"
 FILE="/opt/etc/unblock/unblock-list.txt"
 ```
 
-### Пример заполнения unblock-list.txt
+### Example of filling unblock-list.txt
 ```
 example.com
 1.1.1.1
 93.184.220.0/24
 ```
 
-## Замечание
-Учтите, что по умолчанию трафик перенаправляется только для устройств из сегмента «Домашняя сеть» (Bridge0). При попытке доступа непосредственно с роутера, трафик не отправится в VPN-туннель. Если вас это не устраивает, последовательно выполните следующие три команды:
+## Comment
+Please note that by default, traffic is redirected only for devices from the Home Network segment (Bridge0). When trying to access directly from the router, the traffic will not be sent to the VPN tunnel. If you are not satisfied with this, run the following three commands in sequence:
 
 ```shell
 ip rule del priority 1995 2>/dev/null
@@ -57,10 +57,10 @@ ip rule add table 1000 priority 1995
 sed -i 's/iif br0 //' /opt/etc/unblock/start-stop.sh
 ```
 
-После этого под перенаправление попадут все устройства, включая сам роутер.
+After this, all devices, including the router itself, will be redirected.
 
-## Удаление
-Для удаления выполните команду:
+## Removal
+To remove, run the command:
 
 ```shell
 /opt/etc/unblock/uninstall.sh
